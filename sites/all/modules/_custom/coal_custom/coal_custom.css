@@ -1,0 +1,59 @@
+#navigation .block {
+    float:left;
+}
+
+#block-menu-menu-top-menu {
+    width: 75%;
+}
+
+#block-locale-language {
+    width: 25%;
+}
+
+#block-locale-language ul.language-switcher-locale-url {
+    text-align: right;
+    font-size: 0;
+    margin-top: 5px;
+}
+#block-locale-language ul.language-switcher-locale-url li {
+    list-style-type: none;
+    border: 1px solid white;
+    display: inline-block;
+    background: #7a7a7a;
+}
+#block-locale-language ul.language-switcher-locale-url li.first {
+    /*padding-left: 15px;
+    padding-right: 15px;*/
+    padding: 5px 15px;
+    border-bottom-left-radius: 15px;
+    border-top-left-radius: 15px;
+    margin: 0;
+    font-size: 0;
+}
+#block-locale-language ul.language-switcher-locale-url li.last {
+    font-weight: normal;
+    padding: 5px 15px;
+    /*padding-left: 15px;
+    padding-right: 15px;*/
+    border-bottom-left-radius: 0;
+    border-top-left-radius: 0;
+    border-bottom-right-radius: 15px;
+    border-top-right-radius: 15px;
+}
+#block-locale-language ul.language-switcher-locale-url li a {
+    font-size: 14px;
+}
+
+#block-locale-language ul.language-switcher-locale-url li.active {
+    background: white;
+}
+#block-locale-language ul.language-switcher-locale-url li.active a {
+    color: black;
+}
+#site-name {
+    font-size: 200%;
+}
+#header-inside-right ul.secondary-menu {
+    display: inline-block;
+    float: right;
+}

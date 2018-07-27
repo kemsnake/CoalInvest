@@ -1,0 +1,132 @@
+<?php
+
+/**
+ * Tests the select or other text field based functionality
+ */
+class SelectOrOtherNumberTestCase extends SelectOrOtherTestBase {
+
+  public static function getInfo() {
+    return array(
+      'name' => 'Select or Other number',
+      'description' => 'Ensure that Select or Other functions correctly while used in combination with list fields.',
+      'group' => 'Select or Other',
+    );
+  }
+
+  public function setUp() {
+    parent::setUp();
+    $widgets = array('select_or_other', 'select_or_other_buttons');
+    // Field types to test.
+    $field_types = array(
+      'number_integer',
+      'number_float',
+      'number_decimal',
+    );
+
+    foreach ($field_types as $type) {
+      $options = array();
+      $delta = 1;
+      switch ($type) {
+        case 'number_integer':
+          $options[] = "{$delta}|{$this->randomName()}";
+          $delta++;
+          $options[] = "{$delta}|{$this->randomName()}";
+          break;
+
+        case 'number_float':
+        case 'number_decimal':
+          $decimal = .11 + $delta++;
+          $options[] = "{$decimal}|{$this->randomName()}";
+          $decimal = .12 + $delta;
+          $options[] = "{$decimal}|{$this->randomName()}";
+          break;
+      }
+
+      $widget_settings = array('available_options' => implode("\r\n", $options));
+      $this->prepareTestFields($type, array(), $widgets, $widget_settings, $type);
+    }
+
+    $this->drupalLogin($this->drupalCreateUser($this->defaultPermissions));
+  }
+
+  /**
+   * Tests Select or Other without other selected.
+   */
+  function testNoOtherSelected() {
+    foreach ($this->fields as $field_name => $field) {
+      $options = $this->getAvailableOptions($field['instance_settings']);
+      $keys = array_keys($options);
+      $this->setFieldValue($field_name, $keys[0]);
+      // Add the </div> because assertRaw fails for integer values.
+      $this->assertRaw("{$keys[0]}</div>");
+      $this->assertNoRaw('select_or_other');
+    }
+  }
+
+  function testOtherSelected() {
+    foreach ($this->fields as $field_name => $field) {
+
+      $other = rand(50, 100);
+      $this->setFieldValue($field_name, 'select_or_other', $other);
+      // Add the </div> because assertRaw fails for integer values.
+
+      if (in_array($field['field_settings']['type'], array(
+        'number_float',
+        'number_decimal'
+      ))) {
+        $this->assertRaw("{$other}.00</div>");
+      }
+      else {
+        $this->assertRaw("{$other}</div>");
+      }
+      $this->assertNoRaw('select_or_other');
+    }
+  }
+
+
+  function testOtherSelectedWithPreExistingKey() {
+    foreach ($this->fields as $field_name => $field) {
+      $options = $this->getAvailableOptions($field['instance_settings']);
+      $keys = array_keys($options);
+      $this->setFieldValue($field_name, 'select_or_other', $keys[0]);
+      // Add the </div> because assertRaw fails for integer values.
+      $this->assertRaw("{$keys[0]}</div>");
+      $this->assertNoRaw('select_or_other');
+      // Edit the node.
+      $this->clickLink(t('Edit'));
+      // Make sure the pre-existing option was selected.
+      if ($field['widget'] === 'select_or_other') {
+        // Select widgets have options which get selected.
+        $this->assertOptionSelected("edit-{$field_name}-und-select", $keys[0]);
+      }
+      else {
+        // Checkboxes and radios have options that get checked. They are checked
+        // by #id, which is why we need to remove the '.' from the key.
+        $key = str_replace('.', '', $keys[0]);
+        $this->assertFieldChecked("edit-{$field_name}-und-select-{$key}");
+      }
+    }
+  }
+
+  protected function getAvailableOptions($instance_settings) {
+    $options = array();
+
+    $lines = explode("\r\n", $instance_settings['widget']['settings']['available_options']);
+    foreach ($lines as $line) {
+      $parts = explode('|', $line);
+      if (count($parts) > 1) {
+        $options[$parts[0]] = $parts[1];
+      }
+    }
+
+    return ($options);
+  }
+
+  /**
+   * Make sure an empty option is present when relevant.
+   */
+  function testEmptyOption($other_option = '') {
+    parent::testEmptyOption(999);
+  }
+
+}

@@ -1,0 +1,97 @@
+<?php
+
+/**
+ * Implements hook_init().
+ */
+function coal_custom_init() {
+  drupal_add_css(drupal_get_path('module', 'coal_custom') . '/coal_custom.css');
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function coal_custom_block_info() {
+  $blocks['cryptonator_form'] = array(
+    'info' => t('Cryptonator form'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+function coal_custom_block_view($delta) {
+  $block = array();
+
+  switch ($delta) {
+    case 'cryptonator_form':
+      $form = drupal_get_form('coal_custom_cryptonator_form');
+      if ($GLOBALS['user']->uid != 0) {
+        $block['subject'] = t('Form');
+        $block['content'] = render($form);
+      }
+      break;
+  }
+  return $block;
+}
+
+function coal_custom_cryptonator_form($form, &$form_state) {
+  $form = array();
+  $form['#action'] = 'https://api.cryptonator.com/api/merchant/v1/startpayment';
+  $form['#method'] = 'GET';
+  $form['#pre_render'][] = 'coal_custom_cryptonator_form_pre_render';
+  $form['merchant_id'] = array(
+    '#type' => 'hidden',
+    '#value' => '195ac4436a003502159dc95d34e9ad4a',
+  );
+  $form['item_name'] = array(
+    '#type' => 'hidden',
+    '#value' => 'Пополнение баланса юзера ' . $GLOBALS['user']->name . ' (' . $GLOBALS['user']->uid . ')',
+  );
+  $form['order_id'] = array(
+    '#type' => 'hidden',
+    '#value' => '123',
+  );
+  $form['language'] = array(
+    '#type' => 'hidden',
+    '#value' => 'ru',
+  );
+  $form['success_url'] = array(
+    '#type' => 'hidden',
+    '#value' => 'http://local.coal.com/admin',
+  );
+  $form['failed_url'] = array(
+    '#type' => 'hidden',
+    '#value' => 'http://local.coal.com/modules',
+  );
+  $form['invoice_amount'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Сумма',
+  );
+  $form['invoice_currency'] = array(
+    '#type' => 'select',
+    '#options' => array(
+      'rur' => 'RUB',
+      'usd' => 'USD',
+      'eur' => 'EUR',
+      'bitcoin' => 'Bitcoin',
+      'dash' => 'Dash',
+      'litecoin' => 'Litecoin',
+    ),
+    '#title' => 'Валюта',
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Оплатить',
+  );
+
+  return $form;
+}
+
+/**
+ * Form pre render callback.
+ */
+function coal_custom_cryptonator_form_pre_render($form) {
+  unset($form['form_token']);
+  unset($form['form_build_id']);
+  unset($form['form_id']);
+  unset($form['submit']['#name']);
+  return $form;
+}

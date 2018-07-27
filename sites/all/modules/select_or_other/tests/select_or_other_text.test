@@ -1,0 +1,105 @@
+<?php
+
+/**
+ * Tests the select or other text field based functionality
+ */
+class SelectOrOtherTextTestCase extends SelectOrOtherTestBase {
+
+  public static function getInfo() {
+    return array(
+      'name' => 'Select or Other Text',
+      'description' => 'Ensure that Select or Other functions correctly while used in combination with text fields.',
+      'group' => 'Select or Other',
+    );
+  }
+
+  public function setUp() {
+    parent::setUp();
+    $widgets = array('select_or_other', 'select_or_other_buttons');
+    $widget_settings = array(
+      'available_options' => "keyed|Keyed\r\nunkeyed",
+      'other_unknown_new_option' => TRUE,
+    );
+    $this->prepareTestFields('text', array(), $widgets, $widget_settings, 'text_default');
+    $user = $this->drupalCreateUser($this->defaultPermissions);
+    $this->drupalLogin($user);
+  }
+
+  /**
+   * Tests Select or Other without other selected.
+   */
+  function testNoOtherSelected() {
+    foreach ($this->fields as $field_name => $field) {
+      $this->setFieldValue($field_name, 'keyed');
+      $this->assertRaw('keyed');
+      $this->assertNoRaw('select_or_other');
+    }
+  }
+
+  /**
+   * Tests select or other with the other value selected.
+   */
+  function testOtherSelected() {
+    foreach ($this->fields as $field_name => $field) {
+      $other_value = $this->randomName();
+      $this->setFieldValue($field_name, 'select_or_other', $other_value);
+      $this->assertRaw($other_value);
+      $this->assertNoRaw('select_or_other');
+    }
+  }
+
+  /**
+   * Tests if other values which correspond with a pre-existing key are saved
+   * using the pre-existing key instead of creating duplicate entries.
+   */
+  function testOtherSelectedWithPreExistingKey() {
+    foreach ($this->fields as $field_name => $field) {
+      $this->setFieldValue($field_name, 'select_or_other', 'keyed');
+      $this->assertRaw('keyed');
+      $this->assertNoRaw('select_or_other');
+      // Edit the node.
+      $this->clickLink(t('Edit'));
+      // Make sure the pre-existing option was selected.
+      if ($field['widget'] === 'select_or_other') {
+        // Select widgets have options which get selected.
+        $this->assertOptionSelected("edit-{$field_name}-und-select", 'keyed');
+      }
+      else {
+        // Checkboxes and radios have options that get checked.
+        $this->assertFieldChecked("edit-{$field_name}-und-select-keyed");
+      }
+      $this->assertFieldByName("{$field_name}[und][other]", '');
+    }
+  }
+
+  /**
+   * Make sure an empty option is present when relevant.
+   */
+  function testEmptyOption($other_option = '') {
+    parent::testEmptyOption('My cool new value');
+  }
+
+  /**
+   * Tests if Other value with special characters are properly selected on edit.
+   */
+  function testSpecialCharHandling() {
+    foreach ($this->fields as $field_name => $field) {
+      $parts = array($this->randomName(), $this->randomName());
+      $other_value = implode('&', $parts);
+      $this->setFieldValue($field_name, 'select_or_other', $other_value);
+      $this->assertText(filter_xss($other_value));
+      $this->assertNoRaw('select_or_other');
+      $this->clickLink(t('Edit'));
+      $option = strtolower(implode($parts));
+      if ($field['widget'] === 'select_or_other') {
+        // Select widgets have options which get selected.
+        $this->assertOptionSelected("edit-{$field_name}-und-select", $other_value);
+      }
+      else {
+        // Checkboxes and radios have options that get checked.
+        $this->assertFieldChecked("edit-{$field_name}-und-select-{$option}");
+      }
+    }
+  }
+
+}

@@ -1,0 +1,578 @@
+<?php
+define("COMMERCE_BITCOIN_DEFAULT_MIN_TRANSACTIONS", 3);
+define("COMMERCE_BITCOIN_SATOSHI", 100000000);
+define("COMMERCE_BITCOIN_DEFAULT_SERVER_TYPE", 'Bitcoin daemon');
+define("COMMERCE_BITCOIN_DEFAULT_RATE_LOOKUP", 'blockchain.info');
+/**
+ * @file
+ * Provides a payment method and currency for Drupal Commerce via Bitcoin
+ *
+ */
+
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_bitcoin_commerce_payment_method_info() {
+  $payment_methods = array();
+
+  $img = theme('image', array(
+    'path' => drupal_get_path('module', 'commerce_bitcoin') . '/images/bitcoin.png',
+  ));
+
+  $payment_methods['commerce_bitcoin'] = array(
+    'base' => 'commerce_bitcoin',
+    'title' => t('Bitcoin payment interface'),
+    'short_title' => 'Bitcoin',
+    'display_title' => $img. t("Pay with Bitcoin"),
+    'description' => t('Bitcoin universal currency payment'),
+    //'terminal' => FALSE,
+  );
+
+  return $payment_methods;
+}
+
+function commerce_bitcoin_commerce_order_view($order, $view_mode) {
+  if (!empty($order->commerce_bitcoin)) {
+    $order->content['bitcoin'] = array(
+      '#type' => 'markup',
+      '#markup' => $order->commerce_bitcoin['bitcoin_address']
+    );
+  }
+}
+
+
+/**
+ * Implementation of hook_entity_load
+ *
+ * Add the existing Bitcoin payment address to the order if it exists
+ *
+ * @param $entities
+ * @param $type
+ */
+function commerce_bitcoin_entity_load($entities, $type) {
+  if ($type == 'commerce_order') {
+
+    foreach ($entities as $entity) {
+      $entity->commerce_bitcoin = array();
+      if ($bitcoin_transaction = db_query("SELECT * FROM commerce_bitcoin WHERE order_id = :id",
+        array(':id' => $entity->order_id))->fetchAssoc()
+      ) {
+        if (isset($entity->commerce_order_total[LANGUAGE_NONE][0]['amount'])) {
+          // non btc should run via the exchange rate saved
+          if ($entity->commerce_order_total[LANGUAGE_NONE][0]['currency_code'] != 'BTC') {
+            // @todo is it always 100 ?
+            $hundred_base = $entity->commerce_order_total[LANGUAGE_NONE][0]['amount'] / 100;
+            $rate = $bitcoin_transaction['exchange_rate'];
+            $total_payable = round($hundred_base / $rate, 8, PHP_ROUND_HALF_UP);
+            $bitcoin_transaction['total_payable'] = $total_payable;
+          } else {
+            $bitcoin_transaction['total_payable'] = $entity->commerce_order_total[LANGUAGE_NONE][0]['amount'] / COMMERCE_BITCOIN_SATOSHI;
+          }
+        }
+        $entity->commerce_bitcoin = $bitcoin_transaction;
+      }
+    }
+  }
+}
+
+/**
+ * declare a new BTC currency
+ *
+ */
+function commerce_bitcoin_commerce_currency_info() {
+  return array(
+    'BTC' => array(
+      'code' => 'BTC',
+      'symbol' => 'BTC',
+      'decimals' => 8,
+      'name' => t('Bitcoin'),
+      'numeric_code' => '',
+      'symbol_placement' => 'after',
+      'code_placement' => '',
+      'minor_unit' => t('Coins'),
+      'major_unit' => t('Coins')
+    )
+  );
+}
+
+function commerce_bitcoin_default_settings() {
+  return array(
+    'conn_type' => COMMERCE_BITCOIN_DEFAULT_SERVER_TYPE,
+
+  );
+}
+
+/**
+ * Payment method callback: settings form.
+ */
+function commerce_bitcoin_settings_form($settings = array()) {
+  // Merge default settings into the stored settings array.
+  $settings = (array) $settings + commerce_bitcoin_default_settings();
+
+  $form = array();
+
+  $form['conn_type'] = array(
+    '#type' => 'select',
+    '#options' => drupal_map_assoc(array('Bitcoin daemon', 'Blockchain.info')),
+    '#title' => t('Select the backend type (server direct or blockchain.info)'),
+    '#default_value' => $settings['conn_type']
+  );
+
+  // BLOCKCHAIN.INFO Config
+
+  $form['connection']['blockchain_info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Blockchain.info'),
+    '#states' => array(
+      'visible' => array(
+        'select[id=edit-parameter-payment-method-settings-payment-method-settings-conn-type]' => array('value' => 'Blockchain.info'),
+      ),
+    ),
+  );
+
+  $form['connection']['blockchain_info']['logo'] = array(
+    '#markup' => theme('image', array(
+      'path' => drupal_get_path('module', 'commerce_bitcoin') . '/images/blockchain-logo.png',
+    ))
+  );
+
+  // Fields that we need
+  // https://blockchain.info/merchant/$guid/new_address?password=$main_password&second_password=$second_password&label=$label
+  $form['connection']['blockchain_info']['blockchain_guid'] = array(
+    '#type' => 'textfield',
+    '#title' => t('GUID (Also known as your Wallet ID)'),
+    '#default_value' => $settings['connection']['blockchain_info']['blockchain_guid'],
+    '#description' => t("For example") . ' ' . '00000000-0000-0000-0000-000000000000'
+  );
+
+  $form['connection']['blockchain_info']['blockchain_main_password'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Main password'),
+    '#default_value' => $settings['connection']['blockchain_info']['blockchain_main_password'],
+    '#description' => t('Main password')
+  );
+
+  $form['connection']['blockchain_info']['blockchain_second_password'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Second password'),
+    '#default_value' => $settings['connection']['blockchain_info']['blockchain_second_password'],
+    '#description' => t('Second password') . ' - ' . t('generally used for two factor authentication')
+  );
+
+  // BITCOIN direct to server configuration
+
+  $form['connection']['bitcoind'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Direct Bitcoin server connection'),
+    '#states' => array(
+      'visible' => array(
+        'select[id=edit-parameter-payment-method-settings-payment-method-settings-conn-type]' => array('value' => COMMERCE_BITCOIN_DEFAULT_SERVER_TYPE),
+      ),
+    ),
+  );
+
+
+  $form['connection']['bitcoind']['logo'] = array(
+    '#markup' => theme('image', array(
+      'path' => drupal_get_path('module', 'commerce_bitcoin') . '/images/WeLv_BC_48px.png',
+    ))
+  );
+
+  $form['connection']['bitcoind']['commerce_bitcoin_server_scheme'] = array(
+    '#type' => 'radios',
+    '#title' => t('Server scheme'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_scheme'],
+    '#options' => array('http' => 'HTTP', 'https' => 'HTTPS'),
+  );
+  $form['connection']['bitcoind']['commerce_bitcoin_server_certificate_path'] = array(
+    '#type' => 'textfield',
+    '#title' => t('SSL certificate path'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_certificate_path'],
+    '#description' => t('Location of the server.cert file you generated for bitcoind, if you are using HTTPS, more information !link',
+      array('!link' => '<a href="https://en.bitcoin.it/wiki/Enabling_SSL_on_original_client_daemon">' . t('available here') . '</a>')),
+  );
+  $form['connection']['bitcoind']['commerce_bitcoin_server_username'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Server username'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_username'],
+    '#description' => t("User name for your Bitcoin server's JSON-RPC-HTTP interface"),
+  );
+  $form['connection']['bitcoind']['commerce_bitcoin_server_password'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Server password'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_password'],
+    '#description' => t('Bitcoin server password'),
+  );
+  $form['connection']['bitcoind']['commerce_bitcoin_server_address'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Server hostname'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_address'],
+    '#description' => t('Bitcoin server domain name or IP address. Use "localhost" if bitcoind is running on the Ubercart server.'),
+  );
+  $form['connection']['bitcoind']['commerce_bitcoin_server_port'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Server port'),
+    '#default_value' => $settings['connection']['bitcoind']['commerce_bitcoin_server_port'],
+    '#description' => t('Bitcoin server port (generally 8332 or 443 if you have selected HTTPS above)'),
+  );
+  $form['transaction'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Transaction settings'),
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+
+  $form['transaction']['commerce_bitcoin_rate_lookup'] = array(
+    '#type' => 'select',
+    '#title' => t('Preferred service for exchange rate lookup'),
+    '#default_value' => $settings['transaction']['commerce_bitcoin_rate_lookup'],
+    '#required' => TRUE,
+    '#options' => array(
+      'blockchain.info' => 'Blockchain.info',
+      'coinbase' => 'Coinbase'
+    )
+  );
+
+  $form['transaction']['commerce_bitcoin_transaction_timeout'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Transaction timeout (hours)'),
+    '#default_value' => $settings['transaction']['commerce_bitcoin_transaction_timeout'],
+    '#size' => 4,
+    '#description' => t('Transactions not paid for within this number of hours will be automatically cancelled. Decimals are permitted.'),
+    '#required' => TRUE,
+  );
+
+
+  $options = array();
+  for ($i = 0; $i <= 10; $i++) {
+    $options[$i] = $i;
+  }
+  $form['transaction']['commerce_bitcoin_transaction_confirms'] = array(
+    '#type' => 'select',
+    '#title' => t('Minimum transaction confirmations'),
+    '#default_value' => $settings['transaction']['commerce_bitcoin_transaction_confirms'],
+    '#description' => t('Minimum number of Bitcoin transaction network confirmations required before a payment is considered accepted.'),
+    '#required' => TRUE,
+    '#options' => $options
+  );
+  $form['#validate'][] = 'commerce_bitcoin_settings_form_validate';
+
+  return $form;
+}
+
+/**
+ * Payment method callback: submit form element validation.
+ */
+function commerce_bitcoin_settings_form_validate($element, &$form_state) {
+  $x = 1;
+  // Test the URL provided is valid
+  /*
+    if (!valid_url($element['#value'], TRUE)) {
+      form_set_error('bitcoin_server_uri', t("Invalid URL specified for your Bitcoin server URI, must be https:// or http://"));
+      return;
+    }
+
+    // Test that we can connect to the given URL
+    if (_commerce_bitcoin_inc()) {
+      $bitcoin = new bitcoinClient($element['#value']);
+      if (!$bitcoin->testConnection()) {
+        drupal_set_message(t('Warning, Unable to connect to given Bitcoin server URI'), 'warning');
+      }
+      else {
+        drupal_set_message(t('Succesfully tested your Bitcoin connection.'));
+      }
+    }
+    else {
+      //form_set_error('bitcoin_server_uri', t("Unable to find the JSONRPC library"));
+    }*/
+}
+
+
+/**
+ * Payment method callback: checkout form submission.
+ * Connect with your bitcoin endpoint and get an address
+ */
+function commerce_bitcoin_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
+  $label = t('Order ID') . " : " . $order->order_id;
+  $address = commerce_bitcoin_get_new_pay_to_address($label, $payment_method['settings']);
+
+  $currency = $order->commerce_order_total[LANGUAGE_NONE][0]['currency_code'];
+
+  $provider = 'blockchain.info';
+
+  if (!$rate = commerce_bitcoin_exchange_rate($currency, $provider)) {
+   form_set_error('', t('Could not obtain a current exchange rate (please try again)'));
+  }
+
+
+  if ($address && $rate) {
+    // Record it for the future, this is attached at any later stage via hook_entity_load
+    db_insert('commerce_bitcoin')
+      ->fields(array(
+        'order_id' => $order->order_id,
+        'bitcoin_address' => $address,
+        'exchange_rate' => $rate
+      ))
+      ->execute();
+  }
+  else {
+    form_set_error('', t('Could not get a new bitcoin address :( sorry'));
+  }
+}
+
+
+/**
+ * Implements hook_commerce_checkout_pane_info()
+ */
+function commerce_bitcoin_commerce_checkout_pane_info() {
+  $panes['commerce_bitcoin'] = array(
+    'title' => t('Bitcoin Payment Details'),
+    'page' => 'complete',
+    'weight' => 10,
+    'file' => 'includes/commerce_bitcoin.checkout_pane.inc',
+    'base' => 'commerce_bitcoin_pane',
+  );
+  return $panes;
+}
+
+/**
+ * Implementation of hook_cron
+ *
+ * Go through all the open BTC transactions and find ones that have paid
+ * Also set to 'cancelled' those not recieved within 7 days
+ *//*
+function commerce_bitcoin_cron() {
+
+
+  // prepare the orders to check
+  $query = db_select('commerce_order', 'co');
+  $query->join('commerce_bitcoin', 'cb', 'co.order_id = cb.order_id');
+  $query->fields('cb');
+  $query->addField('co', 'status');
+  $query->addTag('commerce_bitcoin');
+  $result = $query->execute();
+
+  // @todo configurable or use rules somehow
+  $allowed_status = array('pending', 'processing');
+  foreach ($result as $order) {
+    if (in_array($order->status, $allowed_status)) {
+      $original_order = commerce_order_load($order->order_id);
+      if(isset($original_order->commerce_bitcoin['bitcoin_address'])) {
+        $received = 0;
+        $min_confirmations = 3;
+        if ($result = drupal_http_request("https://blockchain.info/q/getreceivedbyaddress/{$address}?confirmations={$min_confirmations}")) {
+          if (isset($result->data) && $json = drupal_json_decode($result->data)) {
+            if (isset($result->data) && $result->data > 1) {
+              $received = $result->data / UC_BITCOIN_SATOSHI;
+            }
+          }
+        }
+
+        // this is stored in cents total, needs to be back to normalised BTC style
+        $total = $original_order->commerce_order_total[LANGUAGE_NONE][0]['amount'] / 100;
+
+        if ($received >= $total) {
+          // Record the payment transaction
+          $transaction = commerce_payment_transaction_new('commerce_bitcoin', $order->order_id);
+          $instance_id = 'commerce_bitcoin|'.$order->order_id;
+          $transaction->instance_id = $instance_id;
+          $transaction->amount = $received;
+          $transaction->currency_code = "BTC";
+          $transaction->status = COMMERCE_PAYMENT_STATUS_SUCCESS;
+          $transaction->message = 'Name: @name';
+          $transaction->message_variables = array('@name' => "Bitcoin server payment");
+
+          // Save the transaction, Commerce will know if this is now paid in full and your rules should move it along
+          commerce_payment_transaction_save($transaction);
+        }
+      }
+    }
+  }
+
+}*/
+
+
+/**
+ * Finds and loads the jsonrpc library
+ * @note: taken from 'less' module example as it's easy to expand
+ */
+function _commerce_bitcoin_inc() {
+  static $loaded = NULL;
+
+
+  if (!isset($loaded)) {
+
+    // Locations to check for jsonrpc, by order of preference.
+    $include_locations = array();
+
+    // Ensure libraries module is loaded.
+    module_load_include('module', 'libraries');
+
+    $include_locations[] = libraries_get_path('jsonrpcphp') . '/includes/jsonRPCClient.php';
+
+    foreach ($include_locations as $include_location) {
+      if (is_file($include_location)) {
+        require_once $include_location;
+        break;
+      }
+    }
+
+    $loaded = class_exists('jsonRPCClient', TRUE);
+
+  }
+
+  if ($loaded) {
+    // include the Bitcoin interface
+    include_once(drupal_get_path('module', 'commerce_bitcoin') . '/includes/bitcoin.inc');
+  }
+
+  return $loaded;
+}
+
+
+function commerce_bitcoin_get_new_pay_to_address($label = "", $settings) {
+
+  $address = FALSE;
+
+  switch ($settings['conn_type']) {
+    case 'Bitcoin daemon':
+      // see if the connection works
+      module_load_include('inc', 'uc_bitcoin', 'includes/bitcoin-php/bitcoin');
+      $bitcoin_client = new BitcoinClient(variable_get("uc_bitcoin_server_scheme", ""),
+        variable_get("uc_bitcoin_server_username", ""),
+        variable_get("uc_bitcoin_server_password", ""),
+        variable_get("uc_bitcoin_server_address", ""),
+        variable_get("uc_bitcoin_server_port", ""),
+        variable_get("uc_bitcoin_server_certificate_path", ""));
+
+      if (TRUE !== ($fault = $bitcoin_client->can_connect())) {
+        watchdog('uc_bitcoin_order', 'Could not connect to backend');
+        break;
+      }
+
+      try {
+        $address = $bitcoin_client->query("getnewaddress", $label);
+      } catch (BitcoinClientException $e) {
+        watchdog('uc_bitcoin_order', 'getnewaddress failed. Fault: !fault', array('!fault' => $e->getMessage()));
+      }
+
+      break;
+
+    case 'Blockchain.info':
+      if (!module_exists('composer_manager')) {
+        form_set_error('', t('You need the composer_manager module installed - this module is required to load the modern Guzzle HTTP library.'));
+      }
+      if (!class_exists('Guzzle\Http\Client')) {
+        form_set_error('', t('Guzzle HTTP library does not seem to be loading, is it installed by following composer_manager\'s steps?'));
+        break;
+      }
+
+      $guid = urlencode($settings['connection']['blockchain_info']['blockchain_guid']);
+      $main_password = urlencode($settings['connection']['blockchain_info']['blockchain_main_password']);
+      $second_password = urlencode($settings['connection']['blockchain_info']['blockchain_second_password']);
+      $label = urlencode(trim($label));
+      $url = "/merchant/{$guid}/new_address?password={$main_password}&second_password={$second_password}&label={$label}";
+
+      // Autoload on demand! Your work: zero.
+      $client = new Guzzle\Http\Client('https://blockchain.info');
+      $request = $client->get($url);
+      $response = $request->send();
+
+      $status = $response->getStatusCode();
+      if ($status == 200) {
+        $result = json_decode($response->getBody());
+        if (isset($result->error)) {
+          watchdog('uc_bitcoin_order', 'Could not get new_address, Password or something else was wrong? (!error)', array('!error' => $result->error));
+        }
+        else {
+          if (isset($result->address)) {
+            $address = $result->address;
+          }
+        }
+      }
+      else {
+        watchdog('uc_bitcoin_order', 'Could not get new_address, some kind of network issue?');
+      }
+      break;
+  }
+  return $address;
+}
+
+/**
+ * UberCart currency convert, do a lookup to MtGox and see what the rate is
+ *
+ * @param $order ubercart order
+ * @return float amount
+ */
+function commerce_bitcoin_exchange_rate($currency = 'USD', $provider = 'blockchain.info') {
+  static $data;
+  $rate = FALSE;
+
+  if ($currency == 'BTC') {
+    // BTC 1:1
+    return 1;
+  }
+
+  if (isset($data[$currency])) {
+    return $data[$currency];
+  }
+
+  $cid = 'uc_bitcoin_'.$provider;
+  switch ($provider) {
+    case 'coinbase':
+      // caching
+      $cache = cache_get($cid);
+      if (!$cache || (isset($cache) && time() > $cache->expire)) {
+        if ($response = drupal_http_request('https://api.coinbase.com/v1/currencies/exchange_rates')) {
+          if ($response->code == 200) {
+            cache_set($cid, $response, 'cache', time() + variable_get('uc_bitcoin_x_seconds', 120));
+          }
+        }
+      }
+      else {
+        $response = $cache->data;
+      }
+      // lookup
+      $currency_code = 'btc_to_' . strtolower($currency);
+      if ($response && $response->code == 200) {
+        $result = json_decode($response->data, TRUE);
+        if (isset($result[$currency_code]) && $result[$currency_code] > 0) {
+          $rate = $result[$currency_code];
+        }
+      }
+
+      break;
+    case 'blockchain.info':
+      // caching
+      $cache = cache_get($cid);
+      if (!$cache || (isset($cache) && time() > $cache->expire)) {
+        if ($response = drupal_http_request('https://blockchain.info/ticker')) {
+          if ($response->code == 200) {
+            cache_set($cid, $response, 'cache', time() + variable_get('uc_bitcoin_x_seconds', 120));
+          }
+        }
+      }
+      else {
+        $response = $cache->data;
+      }
+
+      // lookup
+      if ($response && $response->code == 200) {
+        $result = json_decode($response->data, TRUE);
+        if (isset($result[$currency]) && is_array($result[$currency]) && $result[$currency]['last'] > 0) {
+          $rate = $result[$currency]['last'];
+        }
+      }
+      break;
+  }
+
+  if($rate) {
+    $data[$currency] = $rate;
+  } else {
+    watchdog('uc_bitcoin', 'CoinBase lookup - Unable to get current exchange rate, try refresh', array(), WATCHDOG_ERROR);
+  }
+
+
+  return $rate;
+}

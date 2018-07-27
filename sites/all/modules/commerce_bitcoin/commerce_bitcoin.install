@@ -1,0 +1,103 @@
+<?php
+
+/**
+ * @file
+ * Installs the tables required by Commerce Bitcoin.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function commerce_bitcoin_schema() {
+  $schema = array();
+
+  $schema['commerce_bitcoin'] = array(
+    'fields' => array(
+      'order_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'bitcoin_address' => array(
+        'type' => 'varchar',
+        'length' => '50',
+        'not null' => TRUE,
+      ),
+      'exchange_rate' => array(
+        'description' => 'Record the exchange rate used',
+        'type' => 'numeric',
+        'precision' => 16,
+        'scale' => 5,
+        'not null' => TRUE,
+        'default' => 0.00000000,
+      ),
+    ),
+    'primary key' => array('order_id'),
+    'indexes' => array(
+      'bitcoin_address' => array('bitcoin_address'),
+    ),
+  );
+
+
+  return $schema;
+}
+
+
+/**
+ * Implements hook_install
+ * #2084171 a work around for the int size limitation
+ */
+function commerce_bitcoin_install() {
+  db_change_field('field_data_commerce_order_total', 'commerce_order_total_amount', 'commerce_order_total_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+  db_change_field('field_revision_commerce_order_total', 'commerce_order_total_amount', 'commerce_order_total_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+  db_change_field('field_data_commerce_total', 'commerce_total_amount', 'commerce_total_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+  db_change_field('field_revision_commerce_total', 'commerce_total_amount', 'commerce_total_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+
+  // Change values from #2103625
+  db_change_field('field_data_commerce_unit_price', 'commerce_unit_price_amount', 'commerce_unit_price_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+  db_change_field('field_revision_commerce_unit_price', 'commerce_unit_price_amount', 'commerce_unit_price_amount', array(
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE
+  ));
+
+  drupal_set_message(t("Note: Commerce database table schema was changed to accept Bitcoin Satoshi resolution."));
+}
+
+/**
+ * Add currency conversion record
+ */
+function commerce_bitcoin_update_7001() {
+  if (!db_field_exists('commerce_bitcoin', 'exchange_rate')) {
+    db_add_field('commerce_bitcoin', 'exchange_rate', array(
+      'description' => 'Record the exchange rate used',
+      'type' => 'numeric',
+      'precision' => 16,
+      'scale' => 5,
+      'not null' => TRUE,
+      'default' => 0.00000000,
+    ));
+  }
+}
+
